@@ -1,0 +1,54 @@
+#!/usr/bin/python
+# nicked off hamster-service
+import sys
+import os
+import gobject
+import glib
+
+
+loop = gobject.MainLoop()
+#TODO:how to detect there is a single instance
+try:
+    name = os.path.join(os.path.dirname(__file__), '..')
+    print 'Running from source folder, modifying PYTHONPATH'
+    sys.path.insert(0, os.path.join(name, "hamster"))
+    sys.path.insert(0, name)
+except:
+    #probably run from py2exe, where __file__ is not defined
+    pass
+
+# maintain just one instance. this code feels hackish again
+class WindowServer():
+    def __init__(self, loop):
+        self.app = True
+        self.mainloop = loop
+    
+    def Quit(self):
+        """Shutdown the service"""
+        self.mainloop.quit()
+    
+    def edit(self, id=None): dialogs.edit.show(self.app, fact_id = id)
+    
+    def overview(self): dialogs.overview.show(self.app)
+
+    def about(self): dialogs.about.show(self.app)
+
+    def statistics(self): dialogs.stats.show(self.app)
+
+    def preferences(self): dialogs.prefs.show(self.app)
+
+
+
+if __name__ == '__main__':
+    from hamster.lib import i18n
+    i18n.setup_i18n()
+
+    glib.set_prgname(unicode(_("hamster-windows-service")).encode("utf-8"))
+
+    from hamster.configuration import runtime, dialogs, conf, load_ui_file
+    window_server = WindowServer(loop)
+
+    print "hamster-window-service up"
+
+    loop.run()
+    window_server.about()

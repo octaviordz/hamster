@@ -1,0 +1,275 @@
+#!/usr/bin/python
+# nicked off gwibber
+
+import gobject
+import datetime as dt
+from calendar import timegm
+import gio
+
+loop = gobject.MainLoop()
+#TODO:how to detect there is a single instance
+import sys
+import os.path
+
+try:
+    name = os.path.join(os.path.dirname(__file__), '..')
+    print 'Running from source folder, modifying PYTHONPATH'
+    sys.path.insert(0, os.path.join(name, "hamster"))
+    sys.path.insert(0, name)
+except:
+    #probably run from py2exe, where __file__ is not defined
+    pass
+
+from hamster.lib import i18n
+i18n.setup_i18n()
+
+from hamster import db
+from hamster.lib import stuff, desktop
+
+
+def to_dbus_fact(fact):
+    """Perform the conversion between fact database query and
+    dbus supported data types
+    """
+    return (fact['id'],
+            timegm(fact['start_time'].timetuple()),
+            timegm(fact['end_time'].timetuple()) if fact['end_time'] else 0,
+            fact['description'] or '',
+            fact['name'] or '',
+            fact['activity_id'] or 0,
+            fact['category'] or '',
+            dbus.Array(fact['tags'], signature = 's'),
+            timegm(fact['date'].timetuple()),
+            fact['delta'].days * 24 * 60 * 60 + fact['delta'].seconds)
+
+
+class Storage(db.Storage):
+    __default_service_uri__ = "/org/gnome/Hamster"
+
+    def __init__(self, loop):
+        db.Storage.__init__(self, _("Unsorted"))
+
+        self.mainloop = loop
+
+        self.__file = gio.File(__file__)
+        self.__monitor = self.__file.monitor_file()
+        self.__monitor.connect("changed", self._on_us_change)
+
+        # central place were we plug in all the notifications and such
+        self.integrations = desktop.DesktopIntegrations(self)
+
+
+    def run_fixtures(self):
+        """we start with an empty database and then populate with default
+           values. This way defaults can be localized!"""
+        super(Storage, self).run_fixtures()
+
+        # defaults
+        defaults = [
+            (_("Work"), [_("Reading news"),
+                         _("Checking stocks"),
+                         _("Super secret project X"),
+                         _("World domination")]),
+            (_("Day-to-day"), [_("Lunch"),
+                               _("Watering flowers"),
+                               _("Doing handstands")])
+        ]
+        if not self.get_categories():
+            for category, activities in defaults:
+                cat_id = self.add_category(category)
+                for activity in activities:
+                    self.add_activity(activity, cat_id)
+
+
+    # stop service when we have been updated (will be brought back in next call)
+    # anyway. should make updating simpler
+    def _on_us_change(self, monitor, gio_file, event_uri, event):
+        if event == gio.FILE_MONITOR_EVENT_CHANGES_DONE_HINT:
+            print "`%s` has changed. Quitting!" % __file__
+            self.Quit()
+    
+    def TagsChanged(self): pass
+    def tags_changed(self):
+        self.TagsChanged()
+    
+    def FactsChanged(self): pass
+    def facts_changed(self):
+        self.FactsChanged()
+    
+    def ActivitiesChanged(self): pass
+    def activities_changed(self):
+        self.ActivitiesChanged()
+    
+    def ToggleCalled(self): pass
+    def toggle_called(self):
+        self.toggle_called()
+
+    def dispatch_overwrite(self):
+        self.TagsChanged()
+        self.FactsChanged()
+        self.ActivitiesChanged()
+    
+    def Quit(self):
+        """
+        Shutdown the service
+        example:
+            import dbus
+            obj = dbus.SessionBus().get_object("org.gnome.Hamster", "/org/gnome/Hamster")
+            service = dbus.Interface(obj, "org.gnome.Hamster")
+            service.Quit()
+        """
+        #log.logger.info("Hamster Service is being shutdown")
+        self.mainloop.quit()
+
+    
+    def Toggle(self):
+        """Toggle visibility of the main application window.
+           If several instances are available, it will toggle them all.
+        """
+        #log.logger.info("Hamster Service is being shutdown")
+        self.ToggleCalled()
+
+    # facts    
+    def AddFact(self, fact, start_time, end_time, temporary = False):
+        start_time = dt.datetime.utcfromtimestamp(start_time) if start_time else None
+        end_time = dt.datetime.utcfromtimestamp(end_time) if end_time else None
+        return self.add_fact(fact, start_time = start_time, end_time = end_time) or 0
+
+    
+    def GetFact(self, fact_id):
+        """Get fact by id. For output format see GetFacts"""
+        fact = dict(self.get_fact(fact_id))
+        fact['date'] = fact['start_time'].date()
+        fact['delta'] = dt.timedelta()
+        return to_dbus_fact(fact)
+
+    
+    def UpdateFact(self, fact_id, fact, start_time, end_time, temporary = False):
+        start_time = start_time or None
+        if start_time:
+            start_time = dt.datetime.utcfromtimestamp(start_time)
+
+        end_time = end_time or None
+        if end_time:
+            end_time = dt.datetime.utcfromtimestamp(end_time)
+        return self.update_fact(fact_id, fact, start_time, end_time, temporary)
+
+
+    def StopTracking(self, end_time):
+        """Stops tracking the current activity"""
+        end_time = end_time or None
+        if end_time:
+            end_time = dt.datetime.utcfromtimestamp(end_time)
+        return self.stop_tracking(end_time)
+
+
+    def RemoveFact(self, fact_id):
+        """Remove fact from storage by it's ID"""
+        return self.remove_fact(fact_id)
+
+
+    def GetFacts(self, start_date, end_date, search_terms):
+        """Gets facts between the day of start_date and the day of end_date.
+        Parameters:
+        i start_date: Seconds since epoch (timestamp). Use 0 for today
+        i end_date: Seconds since epoch (timestamp). Use 0 for today
+        s search_terms: Bleh
+        Returns Array of fact where fact is struct of:
+            i  id
+            i  start_time
+            i  end_time
+            s  description
+            s  activity name
+            i  activity id
+            i  category name
+            as List of fact tags
+            i  date
+            i  delta
+        """
+        #TODO: Assert start > end ?
+        start = dt.date.today()
+        if start_date:
+            start = dt.datetime.utcfromtimestamp(start_date).date()
+
+        end = None
+        if end_date:
+            end = dt.datetime.utcfromtimestamp(end_date).date()
+
+        return [to_dbus_fact(fact) for fact in self.get_facts(start, end, search_terms)]
+
+
+    def GetTodaysFacts(self):
+        """Gets facts of today, respecting hamster midnight. See GetFacts for
+        return info"""
+        return [to_dbus_fact(fact) for fact in self.get_todays_facts()]
+
+
+    # categories
+    def AddCategory(self, name):
+        return self.add_category(name)
+    
+    def GetCategoryId(self, category):
+        return self.get_category_id(category)
+
+    def UpdateCategory(self, id, name):
+        self.update_category(id, name)
+
+    def RemoveCategory(self, id):
+        self.remove_category(id)
+
+    def GetCategories(self):
+        return [(category['id'], category['name']) for category in self.get_categories()]
+
+
+    # activities
+    def AddActivity(self, name, category_id = -1):
+        return self.add_activity(name, category_id)
+
+    def UpdateActivity(self, id, name, category_id):
+        self.update_activity(id, name, category_id)
+
+    def RemoveActivity(self, id):
+        return self.remove_activity(id)
+
+    def GetCategoryActivities(self, category_id = -1):
+        return [(row['id'],
+                 row['name'],
+                 row['category_id'],
+                 row['name'] or '') for row in
+                      self.get_category_activities(category_id = category_id)]
+
+
+    def GetActivities(self, search = ""):
+        return [(row['name'], row['category'] or '') for row in self.get_activities(search)]
+
+
+    def ChangeCategory(self, id, category_id):
+        return self.change_category(id, category_id)
+
+
+    def GetActivityByName(self, activity, category_id, resurrect = True):
+        category_id = category_id or None
+        if activity:
+            return dict(self.get_activity_by_name(activity, category_id, resurrect) or {})
+        else:
+            return {}
+
+    # tags
+    def GetTags(self, only_autocomplete):
+        return [(tag['id'], tag['name'], tag['autocomplete']) for tag in self.get_tags(only_autocomplete)]
+
+
+    def GetTagIds(self, tags):
+        return [(tag['id'], tag['name'], tag['autocomplete']) for tag in self.get_tag_ids(tags)]
+
+
+    def SetTagsAutocomplete(self, tags):
+        self.update_autocomplete_tags(tags)
+
+
+
+
+if __name__ == '__main__':
+    print "hamster-service up"
+    storage = Storage(loop)
+    loop.run()

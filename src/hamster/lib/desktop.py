@@ -17,33 +17,32 @@
 # You should have received a copy of the GNU General Public License
 # along with Project Hamster.  If not, see <http://www.gnu.org/licenses/>.
 
+import sys
 import datetime as dt
 from calendar import timegm
 import logging
 import gobject
 
-
-from hamster import idle
+if sys.platform.startswith('linux'):
+    import dbus
+    from hamster import idle
 from hamster.configuration import conf
 from hamster.lib import trophies
-import dbus
 
 
 class DesktopIntegrations(object):
     def __init__(self, storage):
         self.storage = storage # can't use client as then we get in a dbus loop
         self._last_notification = None
-
-        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
-        self.bus = dbus.SessionBus()
-
+        
         self.conf_enable_timeout = conf.get("enable_timeout")
         self.conf_notify_on_idle = conf.get("notify_on_idle")
         self.conf_notify_interval = conf.get("notify_interval")
         conf.connect('conf-changed', self.on_conf_changed)
 
-        self.idle_listener = idle.DbusIdleListener()
-        self.idle_listener.connect('idle-changed', self.on_idle_changed)
+        if sys.platform.startswith('linux'):
+            self.idle_listener = idle.DbusIdleListener()
+            self.idle_listener.connect('idle-changed', self.on_idle_changed)
 
         gobject.timeout_add_seconds(60, self.check_hamster)
 
@@ -90,11 +89,9 @@ class DesktopIntegrations(object):
 
     def notify_user(self, summary="", details=""):
         if not hasattr(self, "_notification_conn"):
-            self._notification_conn = dbus.Interface(self.bus.get_object('org.freedesktop.Notifications',
-                                                                         '/org/freedesktop/Notifications'),
-                                                    dbus_interface='org.freedesktop.Notifications')
+            self._notification_conn = get_notifier()
         conn = self._notification_conn
-
+        
         notification = conn.Notify("Project Hamster",
                                    self._last_notification or 0,
                                    "hamster-time-tracker",
@@ -117,3 +114,35 @@ class DesktopIntegrations(object):
     def on_conf_changed(self, event, key, value):
         if hasattr(self, "conf_%s" % key):
             setattr(self, "conf_%s" % key, value)
+
+
+class Win32Notification(object):
+    def __init__(self):
+        pass
+        #TODO:IMPLEMENT WIN32 CLIENT            
+            
+
+class DbusNotifier(object):
+    def __init__(self):        
+        dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
+        self.bus = dbus.SessionBus()
+        self.client = dbus.Interface(self.bus.get_object(                                                         
+                    'org.freedesktop.Notifications',
+                    '/org/freedesktop/Notifications'),
+                dbus_interface='org.freedesktop.Notifications')
+    def notify(self, app_name, replace_id, app_icon,
+               summary, body, actions, hints, expire_timeout):
+        self.client.Notify(app_name,
+                           replace_id,
+                           app_icon,
+                           summary,
+                           body,
+                           actions,
+                           hints,
+                           expire_timeout)
+        
+def get_notifier():
+    if sys.platform.startswith('win'):
+        return Win32Notification()
+    return DbusNotifier()    
+

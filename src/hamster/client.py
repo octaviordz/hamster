@@ -18,10 +18,11 @@
 # You should have received a copy of the GNU General Public License
 # along with Project Hamster.  If not, see <http://www.gnu.org/licenses/>.
 
-
+import sys
 import datetime as dt
 from calendar import timegm
-import dbus, dbus.mainloop.glib
+if sys.platform.startswith('linux'):          
+    import dbus, dbus.mainloop.glib
 import gobject
 from lib import Fact
 from lib import trophies

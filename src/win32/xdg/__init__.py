@@ -1,0 +1,1 @@
+print "Using fake xdg (win32)"
