@@ -21,10 +21,11 @@
 gconf part of this code copied from Gimmie (c) Alex Gravely via Conduit (c) John Stowers, 2006
 License: GPLv2
 """
-
+import sys
 import gconf
 import os
-from client import Storage
+if sys.platform.startswith('linux'):   
+    from client import Storage          
 from xdg.BaseDirectory import xdg_data_home
 import logging
 import datetime as dt
@@ -65,11 +66,10 @@ class RuntimeStore(Singleton):
 
         self.data_dir = os.path.realpath(self.data_dir)
 
-
-        self.storage = Storage()
-
-
-        self.home_data_dir = os.path.realpath(os.path.join(xdg_data_home, "hamster-time-tracker"))
+        if sys.platform.startswith('linux'):
+            self.storage = Storage()
+            
+        self.home_data_dir = os.path.realpath(os.path.join(xdg_data_home, "hamster-time-tracker"))        
 
     @property
     def art_dir(self):
