@@ -1,11 +1,14 @@
 #!/usr/bin/python
 # nicked off gwibber
 
+import zerorpc
+import gevent
 import gobject
 import datetime as dt
 from calendar import timegm
 import gio
 
+gobject.threads_init()
 loop = gobject.MainLoop()
 #TODO:how to detect there is a single instance
 import sys
@@ -43,11 +46,11 @@ def to_dbus_fact(fact):
             fact['delta'].days * 24 * 60 * 60 + fact['delta'].seconds)
 
 
-class Storage(db.Storage):
+class Storage(object):
     __default_service_uri__ = "/org/gnome/Hamster"
 
     def __init__(self, loop):
-        db.Storage.__init__(self, _("Unsorted"))
+        self.db = db.Storage(_("Unsorted"))
 
         self.mainloop = loop
 
@@ -201,7 +204,7 @@ class Storage(db.Storage):
     def GetTodaysFacts(self):
         """Gets facts of today, respecting hamster midnight. See GetFacts for
         return info"""
-        return [to_dbus_fact(fact) for fact in self.get_todays_facts()]
+        return [to_dbus_fact(fact) for fact in self.db.get_todays_facts()]
 
 
     # categories
@@ -240,11 +243,11 @@ class Storage(db.Storage):
 
 
     def GetActivities(self, search = ""):
-        return [(row['name'], row['category'] or '') for row in self.get_activities(search)]
+        return [(row['name'], row['category'] or '') for row in self.db.get_activities(search)]
 
 
     def ChangeCategory(self, id, category_id):
-        return self.change_category(id, category_id)
+        return self.db.change_category(id, category_id)
 
 
     def GetActivityByName(self, activity, category_id, resurrect = True):
@@ -256,20 +259,33 @@ class Storage(db.Storage):
 
     # tags
     def GetTags(self, only_autocomplete):
-        return [(tag['id'], tag['name'], tag['autocomplete']) for tag in self.get_tags(only_autocomplete)]
+        return [(tag['id'], tag['name'], tag['autocomplete']) for tag in self.db.get_tags(only_autocomplete)]
 
 
     def GetTagIds(self, tags):
-        return [(tag['id'], tag['name'], tag['autocomplete']) for tag in self.get_tag_ids(tags)]
+        return [(tag['id'], tag['name'], tag['autocomplete']) for tag in self.db.get_tag_ids(tags)]
 
 
     def SetTagsAutocomplete(self, tags):
-        self.update_autocomplete_tags(tags)
+        self.db.update_autocomplete_tags(tags)
 
-
-
+    
+def _service_func(server=None):
+    print 'remote on'
+    server.run()
+    print 'remote off'
+    
+def _gevent_tick():
+    gevent.sleep(0.001)#gevent switch    
+    return True #True means is not remove from the gobject idle funcs
 
 if __name__ == '__main__':
     print "hamster-service up"
     storage = Storage(loop)
+    s = zerorpc.Server(storage)
+    s.bind("tcp://0.0.0.0:4242")
+    gevent.spawn(_service_func, s).start()
+    gobject.idle_add(_gevent_tick, priority=gobject.PRIORITY_HIGH_IDLE)
     loop.run()
+    s.close()
+    

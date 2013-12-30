@@ -1,5 +1,7 @@
 #!/usr/bin/python
 # nicked off hamster-service
+import zerorpc
+import gevent
 import sys
 import os
 import gobject
@@ -38,6 +40,15 @@ class WindowServer():
     def preferences(self): dialogs.prefs.show(self.app)
 
 
+    
+def _service_func(server=None):
+    print 'remote on'
+    server.run()
+    print 'remote off'
+    
+def _gevent_tick():
+    gevent.sleep(0.001)#gevent switch    
+    return True #True means is not remove from the gobject idle funcs
 
 if __name__ == '__main__':
     from hamster.lib import i18n
@@ -47,8 +58,11 @@ if __name__ == '__main__':
 
     from hamster.configuration import runtime, dialogs, conf, load_ui_file
     window_server = WindowServer(loop)
-
+    s = zerorpc.Server(window_server )
+    s.bind("tcp://0.0.0.0:4242")
+    gevent.spawn(_service_func, s).start()
+    gobject.idle_add(_gevent_tick, priority=gobject.PRIORITY_HIGH_IDLE)
     print "hamster-window-service up"
 
     loop.run()
-    window_server.about()
+    s.close()
